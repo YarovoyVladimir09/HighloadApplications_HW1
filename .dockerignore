@@ -1,0 +1,11 @@
+.git
+.cache
+.vscode
+.devcontainer
+.env
+.env.*
+!.env.example
+build*/
+**/__pycache__/
+*.pyc
+.DS_Store

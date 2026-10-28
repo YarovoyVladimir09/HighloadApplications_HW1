@@ -1,7 +1,7 @@
 """Discover /handlers at runtime and publish a Grafana 11 dashboard.
 
 Requires Python 3.9+ and the standard library only. Administrator credentials
-are read from GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD.
+are read from GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD (or its _FILE).
 """
 from __future__ import annotations
 
@@ -169,6 +169,27 @@ def base_url(value: str) -> str:
     return value.rstrip("/")
 
 
+def read_password() -> str:
+    filename = os.getenv("GRAFANA_ADMIN_PASSWORD_FILE")
+    if filename:
+        for attempt in range(60):
+            try:
+                password = Path(filename).read_text().strip()
+                if password:
+                    return password
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                raise ValueError("Cannot read GRAFANA_ADMIN_PASSWORD_FILE") from error
+            if attempt < 59:
+                time.sleep(0.5)
+        raise ValueError("Credentials initializer has not provided a password within 30 seconds")
+    password = os.getenv("GRAFANA_ADMIN_PASSWORD", "")
+    if not password:
+        raise ValueError("Set GRAFANA_ADMIN_PASSWORD or GRAFANA_ADMIN_PASSWORD_FILE")
+    return password
+
+
 def main(argv: list[str] | None = None) -> int:
     # A failed rerun must invalidate a previous successful run for load startup.
     ready_file = Path(os.environ["DASHBOARD_READY_FILE"]) if os.getenv("DASHBOARD_READY_FILE") else None
@@ -194,9 +215,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--attempts must be positive")
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", args.dashboard_uid):
             raise ValueError("Dashboard UID must contain 1..40 letters, digits, underscores or hyphens")
-        password = os.getenv("GRAFANA_ADMIN_PASSWORD", "")
-        if not password:
-            raise ValueError("Set GRAFANA_ADMIN_PASSWORD in the process environment")
+        password = read_password()
         username = os.getenv("GRAFANA_ADMIN_USER") or "admin"
         auth = base64.b64encode(f"{username}:{password}".encode()).decode()
     except ValueError as error:
@@ -204,6 +223,14 @@ def main(argv: list[str] | None = None) -> int:
 
     for attempt in range(1, args.attempts + 1):
         try:
+            # Podman can start dependencies natively before Compose finishes
+            # waiting for their health status. Verify the health APIs as well.
+            for app in apps:
+                with urlopen(app + "/health", timeout=5) as response:
+                    if response.status != 200:
+                        raise URLError("Application healthcheck is not ready")
+            if request_json(grafana + "/api/health").get("database") != "ok":
+                raise URLError("Grafana database is not ready")
             handlers = discover(apps)
             source = request_json(grafana + "/api/datasources/uid/" + args.datasource_uid, auth=auth)
             if source.get("type") != "prometheus":

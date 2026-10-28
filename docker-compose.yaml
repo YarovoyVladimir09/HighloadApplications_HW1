@@ -38,3 +38,31 @@ services:
       DATACENTER: dc-2
     ports:
       - '127.0.0.1:${APP2_PORT:-18082}:8080'
+
+  prometheus:
+    image: docker.io/prom/prometheus:v3.2.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=6h
+    volumes:
+      - ./config/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - '127.0.0.1:${PROMETHEUS_PORT:-9090}:9090'
+    depends_on:
+      app-1:
+        condition: service_healthy
+      app-2:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:9090/-/ready']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  prometheus-data:

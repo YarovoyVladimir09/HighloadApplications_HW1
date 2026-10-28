@@ -170,6 +170,10 @@ def base_url(value: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # A failed rerun must invalidate a previous successful run for load startup.
+    ready_file = Path(os.environ["DASHBOARD_READY_FILE"]) if os.getenv("DASHBOARD_READY_FILE") else None
+    if ready_file is not None:
+        ready_file.unlink(missing_ok=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app-url", action="append", help="Application URL; repeat for each replica")
     parser.add_argument("--grafana-url", default=os.getenv("GRAFANA_URL", "http://localhost:3000"))
@@ -212,6 +216,8 @@ def main(argv: list[str] | None = None) -> int:
                                            "message": "Generated from live /handlers"})
             if result.get("status") != "success":
                 raise ValueError("Grafana did not confirm dashboard creation")
+            if ready_file is not None:
+                save_dashboard({"status": "success", "uid": args.dashboard_uid}, ready_file)
             print(f"Dashboard ready: {len(handlers)} operations, {len(dashboard['panels'])} panels", flush=True)
             print("JSON: " + str(args.output), flush=True)
             print("Grafana: " + grafana + result.get("url", "/d/" + args.dashboard_uid), flush=True)

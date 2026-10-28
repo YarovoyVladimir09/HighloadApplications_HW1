@@ -104,6 +104,7 @@ services:
       GRAFANA_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       DASHBOARD_OUTPUT: /artifacts/dashboard.json
+      DASHBOARD_READY_FILE: /artifacts/dashboard-ready.json
     volumes:
       - ./tools/generate_dashboard.py:/tools/generate_dashboard.py:ro
       - dashboard-artifacts:/artifacts
@@ -117,6 +118,32 @@ services:
       grafana:
         condition: service_healthy
     restart: 'no'
+
+  load:
+    image: docker.io/library/python:3.12.10-alpine3.21
+    working_dir: /tools
+    command: ['python', 'load.py']
+    environment:
+      PYTHONUNBUFFERED: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      APP_URLS: http://app-1:8080,http://app-2:8080
+      LOAD_RPS: ${LOAD_RPS:-30}
+      LOAD_RAMP_SECONDS: ${LOAD_RAMP_SECONDS:-120}
+      LOAD_ERROR_PERCENT: ${LOAD_ERROR_PERCENT:-4}
+      LOAD_WORKERS: ${LOAD_WORKERS:-16}
+      DASHBOARD_READY_FILE: /artifacts/dashboard-ready.json
+    volumes:
+      - ./tools/load.py:/tools/load.py:ro
+      - dashboard-artifacts:/artifacts:ro
+    depends_on:
+      app-1:
+        condition: service_healthy
+      app-2:
+        condition: service_healthy
+      dashboard-generator:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    stop_grace_period: 15s
 
 volumes:
   prometheus-data:
